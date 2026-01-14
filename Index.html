@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Explorador de Dinámica de Robot 1 GDL</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
+        body { font-family: 'Inter', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+        /* Chart Container Styling Rules */
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 400px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 350px;
+            }
+        }
+
+        .math-block {
+            background-color: #f3f4f6;
+            border-left: 4px solid #3b82f6;
+            padding: 1rem;
+            margin: 1rem 0;
+            font-family: 'JetBrains Mono', monospace;
+            overflow-x: auto;
+        }
+
+        .slider-thumb::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #3b82f6;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+
+        .nav-btn.active {
+            border-bottom: 2px solid #2563eb;
+            color: #2563eb;
+            font-weight: 600;
+        }
+    </style>
+    <!-- Chosen Palette: Blueprint & Steel - Neutral background with technical blues and dark grays. -->
+    <!-- Application Structure Plan:
+         1. Interactive Simulator (Top): Allows users to manipulate physical parameters (mass, length, angle) and see immediate effects on Torque and Robot Position. This "hooks" the user.
+         2. Analytical Deep Dive (Middle): Charts analyzing specific terms (Gravity vs Angle, Friction vs Velocity) to visualize the math.
+         3. Theoretical Walkthrough (Bottom): A tabbed interface explaining the derivation steps (Kinematics -> Energy -> Euler-Lagrange) so the user understands the "why" behind the simulator.
+    -->
+    <!-- Visualization & Content Choices:
+         - Robot Viz: HTML5 Canvas drawing. Goal: Inform/Change. Justification: Immediate visual feedback of theta angle.
+         - Torque Breakdown: Bar Chart (Chart.js). Goal: Compare. Justification: Shows how much Inertia vs Gravity vs Friction contributes to total torque.
+         - Gravity Profile: Line Chart (Chart.js). Goal: Relationships. Justification: Visualizes the non-linearity (cosine) of the gravity term.
+         - Math Blocks: Styled HTML/CSS. Goal: Inform. Justification: Clear presentation of formulas without heavy LaTeX libraries.
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+    <!-- Navigation / Header -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center gap-2">
+                    <div class="w-8 h-8 bg-blue-600 rounded flex items-center justify-center text-white font-bold">R</div>
+                    <span class="font-bold text-xl tracking-tight text-slate-900">RoboDynamics <span class="text-blue-600">Explorer</span></span>
+                </div>
+                <nav class="hidden md:flex space-x-8">
+                    <button onclick="scrollToSection('simulator')" class="text-slate-500 hover:text-blue-600 transition-colors">Simulador</button>
+                    <button onclick="scrollToSection('analysis')" class="text-slate-500 hover:text-blue-600 transition-colors">Análisis</button>
+                    <button onclick="scrollToSection('theory')" class="text-slate-500 hover:text-blue-600 transition-colors">Teoría Paso a Paso</button>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-12">
+
+        <!-- Intro Section -->
+        <section class="text-center max-w-3xl mx-auto">
+            <h1 class="text-4xl font-extrabold text-slate-900 mb-4">Modelado Dinámico de Robot 1 GDL</h1>
+            <p class="text-lg text-slate-600">
+                Esta aplicación interactiva traduce el método de <strong>Euler-Lagrange</strong> en una experiencia visual.
+                Explora cómo la masa, la longitud, la fricción y el movimiento afectan el torque requerido por el motor
+                para controlar un brazo robótico simple.
+            </p>
+        </section>
+
+        <!-- SECTION 1: INTERACTIVE SIMULATOR -->
+        <section id="simulator" class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="p-6 border-b border-slate-100 bg-slate-50">
+                <h2 class="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                    <span>🎛️</span> Laboratorio de Torque Dinámico
+                </h2>
+                <p class="text-slate-600 mt-2">
+                    Ajusta los parámetros físicos y cinemáticos para ver cómo cambia la ecuación de movimiento en tiempo real:
+                    <span class="font-mono bg-slate-200 px-1 rounded text-sm">𝜏 = M(q)q̈ + C(q,q̇)q̇ + G(q)</span>
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-0">
+                <!-- Controls Column -->
+                <div class="lg:col-span-4 p-6 border-b lg:border-b-0 lg:border-r border-slate-100 space-y-6 bg-white">
+                    <h3 class="font-semibold text-slate-400 uppercase text-xs tracking-wider mb-4">Parámetros del Sistema</h3>
+
+                    <!-- Sliders -->
+                    <div class="space-y-4">
+                        <!-- Mass -->
+                        <div>
+                            <div class="flex justify-between text-sm mb-1">
+                                <label class="font-medium text-slate-700">Masa (m<sub>1</sub>)</label>
+                                <span class="text-blue-600 font-mono" id="val-m1">1.0 kg</span>
+                            </div>
+                            <input type="range" min="0.1" max="10" step="0.1" value="1.0" id="input-m1" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                        </div>
+
+                        <!-- Length -->
+                        <div>
+                            <div class="flex justify-between text-sm mb-1">
+                                <label class="font-medium text-slate-700">Longitud (l<sub>1</sub>)</label>
+                                <span class="text-blue-600 font-mono" id="val-l1">1.0 m</span>
+                            </div>
+                            <input type="range" min="0.1" max="5" step="0.1" value="1.0" id="input-l1" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                        </div>
+
+                        <!-- Friction -->
+                        <div>
+                            <div class="flex justify-between text-sm mb-1">
+                                <label class="font-medium text-slate-700">Fricción (b)</label>
+                                <span class="text-blue-600 font-mono" id="val-b">0.001</span>
+                            </div>
+                            <input type="range" min="0" max="1.0" step="0.001" value="0.001" id="input-b" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                        </div>
+
+                        <div class="border-t border-slate-100 my-4"></div>
+                        <h3 class="font-semibold text-slate-400 uppercase text-xs tracking-wider mb-4">Estado Cinemático</h3>
+
+                        <!-- Theta -->
+                        <div>
+                            <div class="flex justify-between text-sm mb-1">
+                                <label class="font-medium text-slate-700">Posición (&theta;)</label>
+                                <span class="text-blue-600 font-mono" id="val-theta">45°</span>
+                            </div>
+                            <input type="range" min="-180" max="180" step="1" value="45" id="input-theta" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                        </div>
+
+                        <!-- Velocity -->
+                        <div>
+                            <div class="flex justify-between text-sm mb-1">
+                                <label class="font-medium text-slate-700">Velocidad (&theta;̇)</label>
+                                <span class="text-blue-600 font-mono" id="val-dtheta">0.0 rad/s</span>
+                            </div>
+                            <input type="range" min="-10" max="10" step="0.1" value="0.0" id="input-dtheta" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                        </div>
+
+                        <!-- Acceleration -->
+                        <div>
+                            <div class="flex justify-between text-sm mb-1">
+                                <label class="font-medium text-slate-700">Aceleración (&theta;̈)</label>
+                                <span class="text-blue-600 font-mono" id="val-ddtheta">0.0 rad/s²</span>
+                            </div>
+                            <input type="range" min="-10" max="10" step="0.1" value="0.0" id="input-ddtheta" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Visualization Column -->
+                <div class="lg:col-span-5 bg-slate-50 flex flex-col justify-center items-center p-6 border-b lg:border-b-0 lg:border-r border-slate-100 relative overflow-hidden">
+                    <canvas id="robotCanvas" width="400" height="400" class="w-full max-w-[400px] h-auto aspect-square bg-white rounded-full shadow-inner border border-slate-200"></canvas>
+                    <div class="absolute bottom-4 text-xs text-slate-400">Visualización Geométrica (X<sub>1</sub>, Y<sub>1</sub>)</div>
+                </div>
+
+                <!-- Output Column -->
+                <div class="lg:col-span-3 p-6 bg-white flex flex-col">
+                    <h3 class="font-semibold text-slate-700 mb-4">Desglose de Torque (&tau;)</h3>
+
+                    <!-- Result Display -->
+                    <div class="mb-6 text-center p-4 bg-slate-900 rounded-xl text-white shadow-lg">
+                        <div class="text-xs text-slate-400 uppercase tracking-wide">Torque Total Requerido</div>
+                        <div class="text-3xl font-mono font-bold mt-1" id="total-torque">0.00 Nm</div>
+                    </div>
+
+                    <!-- Component Breakdown -->
+                    <div class="flex-grow space-y-4">
+                        <div class="chart-container" style="height: 200px;">
+                            <canvas id="torqueBreakdownChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 text-xs text-slate-500 space-y-2 font-mono">
+                        <div class="flex justify-between">
+                            <span>Inercia (M):</span>
+                            <span id="term-inertia" class="text-slate-800 font-bold">0.00</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Fricción (C):</span>
+                            <span id="term-friction" class="text-slate-800 font-bold">0.00</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Gravedad (G):</span>
+                            <span id="term-gravity" class="text-slate-800 font-bold">0.00</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION 2: ANALYSIS CHARTS -->
+        <section id="analysis" class="space-y-6">
+            <div class="border-l-4 border-blue-500 pl-4">
+                <h2 class="text-2xl font-bold text-slate-800">Análisis de Componentes</h2>
+                <p class="text-slate-600">Visualiza cómo se comportan los términos individuales de la ecuación dinámica bajo diferentes condiciones.</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <!-- Gravity Chart -->
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                    <h3 class="font-bold text-lg mb-2 flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-purple-500"></span>
+                        Efecto de la Gravedad
+                    </h3>
+                    <p class="text-sm text-slate-500 mb-4">
+                        Muestra cómo varía el término gravitacional <code>G(q) = m₁gl₁cos(θ)</code> a medida que el robot gira. Observa que el esfuerzo es máximo cuando el brazo está horizontal (0°).
+                    </p>
+                    <div class="chart-container">
+                        <canvas id="gravityChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Energy Chart -->
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                    <h3 class="font-bold text-lg mb-2 flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                        Intercambio de Energías
+                    </h3>
+                    <p class="text-sm text-slate-500 mb-4">
+                        Comparación de Energía Cinética (T) vs Potencial (U) basado en la configuración actual. T depende de la velocidad al cuadrado, U depende de la altura (seno del ángulo).
+                    </p>
+                    <div class="chart-container">
+                        <canvas id="energyChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION 3: THEORY WALKTHROUGH -->
+        <section id="theory" class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="p-6 bg-slate-50 border-b border-slate-200">
+                <h2 class="text-2xl font-bold text-slate-800">Derivación Paso a Paso</h2>
+                <p class="text-slate-600 mt-2">La lógica matemática detrás del modelo.</p>
+            </div>
+
+            <!-- Tabs -->
+            <div class="flex overflow-x-auto border-b border-slate-200 px-6">
+                <button class="nav-btn active px-4 py-3 text-sm font-medium whitespace-nowrap" onclick="switchTab('tab-1', this)">1. Cinemática</button>
+                <button class="nav-btn px-4 py-3 text-sm font-medium text-slate-500 hover:text-slate-700 whitespace-nowrap" onclick="switchTab('tab-2', this)">2. Energías & Lagrangiano</button>
+                <button class="nav-btn px-4 py-3 text-sm font-medium text-slate-500 hover:text-slate-700 whitespace-nowrap" onclick="switchTab('tab-3', this)">3. Fricción & Derivadas</button>
+                <button class="nav-btn px-4 py-3 text-sm font-medium text-slate-500 hover:text-slate-700 whitespace-nowrap" onclick="switchTab('tab-4', this)">4. Ecuación Final</button>
+            </div>
+
+            <!-- Tab Content -->
+            <div class="p-6 lg:p-10 min-h-[400px]">
+
+                <!-- Tab 1: Cinemática -->
+                <div id="tab-1" class="tab-content block animate-fade-in">
+                    <h3 class="text-xl font-bold text-slate-800 mb-4">Definición Geométrica</h3>
+                    <p class="mb-4">Localizamos la masa $m_1$ en el espacio usando coordenadas polares convertidas a cartesianas.</p>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                        <div>
+                            <div class="math-block">
+                                Y<sub>1</sub> = l<sub>1</sub> sin(&theta;)<br>
+                                X<sub>1</sub> = l<sub>1</sub> cos(&theta;)
+                            </div>
+                            <p class="text-sm text-slate-500 mt-2">
+                                <strong>Nota:</strong> Y<sub>1</sub> representa la altura (h) utilizada posteriormente para la energía potencial.
+                            </p>
+                        </div>
+                        <div class="bg-blue-50 p-6 rounded-lg text-sm text-blue-800">
+                            <h4 class="font-bold mb-2">Concepto Clave</h4>
+                            <p>La posición del robot está completamente definida por una sola variable: el ángulo <strong>&theta;</strong>. Esto confirma que es un sistema de 1 Grado de Libertad (1 GDL).</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Energías -->
+                <div id="tab-2" class="tab-content hidden animate-fade-in">
+                    <h3 class="text-xl font-bold text-slate-800 mb-4">Energía Cinética (T) y Potencial (U)</h3>
+
+                    <div class="space-y-6">
+                        <div>
+                            <h4 class="font-semibold text-slate-700">1. Velocidad Lineal Squared (v²)</h4>
+                            <p class="text-sm text-slate-600 mb-2">Derivamos la posición y aplicamos identidad trigonométrica (sin² + cos² = 1).</p>
+                            <div class="math-block">
+                                v<sup>2</sup> = l<sub>1</sub><sup>2</sup> &theta;̇<sup>2</sup>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <h4 class="font-semibold text-slate-700">2. Energía Cinética (T)</h4>
+                                <div class="math-block">
+                                    T = &frac12; m<sub>1</sub> v<sup>2</sup><br>
+                                    <strong>T = &frac12; m<sub>1</sub> l<sub>1</sub><sup>2</sup> &theta;̇<sup>2</sup></strong>
+                                </div>
+                            </div>
+                            <div>
+                                <h4 class="font-semibold text-slate-700">3. Energía Potencial (U)</h4>
+                                <div class="math-block">
+                                    U = m<sub>1</sub> g h<br>
+                                    <strong>U = m<sub>1</sub> g l<sub>1</sub> sin(&theta;)</strong>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <h4 class="font-semibold text-slate-700">4. El Lagrangiano (L = T - U)</h4>
+                            <div class="math-block border-l-green-500 bg-green-50">
+                                L = [&frac12; m<sub>1</sub> l<sub>1</sub><sup>2</sup> &theta;̇<sup>2</sup>] - [m<sub>1</sub> g l<sub>1</sub> sin(&theta;)]
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 3: Fricción & Derivadas -->
+                <div id="tab-3" class="tab-content hidden animate-fade-in">
+                    <h3 class="text-xl font-bold text-slate-800 mb-4">Euler-Lagrange con Disipación</h3>
+                    <p class="mb-4 text-slate-600">Aplicamos la ecuación fundamental considerando la función de disipación de Rayleigh (D) para la fricción.</p>
+
+                    <div class="math-block text-center py-4 bg-slate-800 text-white rounded mb-6">
+                        d/dt(∂L/∂&theta;̇) - ∂L/∂&theta; + ∂D/∂&theta;̇ = &tau;
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div class="p-4 bg-white border border-slate-200 rounded shadow-sm">
+                            <h4 class="font-bold text-blue-600 mb-2">Término Inercial</h4>
+                            <p class="text-xs text-slate-500 mb-2">Derivada temporal de la parcial respecto a velocidad.</p>
+                            <div class="font-mono text-sm">
+                                ∂L/∂&theta;̇ = m<sub>1</sub>l<sub>1</sub><sup>2</sup>&theta;̇<br>
+                                ↓ d/dt<br>
+                                <strong>m<sub>1</sub>l<sub>1</sub><sup>2</sup>&theta;̈</strong>
+                            </div>
+                        </div>
+
+                        <div class="p-4 bg-white border border-slate-200 rounded shadow-sm">
+                            <h4 class="font-bold text-purple-600 mb-2">Término Gravitacional</h4>
+                            <p class="text-xs text-slate-500 mb-2">Parcial respecto a posición.</p>
+                            <div class="font-mono text-sm">
+                                ∂L/∂&theta; = -m<sub>1</sub>gl<sub>1</sub>cos(&theta;)<br>
+                                ↓ (Negativo en ec.)<br>
+                                <strong>+ m<sub>1</sub>gl<sub>1</sub>cos(&theta;)</strong>
+                            </div>
+                        </div>
+
+                        <div class="p-4 bg-white border border-slate-200 rounded shadow-sm">
+                            <h4 class="font-bold text-orange-600 mb-2">Término Fricción</h4>
+                            <p class="text-xs text-slate-500 mb-2">Derivada de Rayleigh (D = &frac12;b&theta;̇²).</p>
+                            <div class="font-mono text-sm">
+                                ∂D/∂&theta;̇ = <strong>b&theta;̇</strong><br>
+                                (Donde b = 0.001)
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 4: Final -->
+                <div id="tab-4" class="tab-content hidden animate-fade-in">
+                    <h3 class="text-xl font-bold text-slate-800 mb-4">Modelo Dinámico Final</h3>
+
+                    <div class="bg-slate-900 text-white p-6 rounded-xl text-center mb-8">
+                        <p class="text-sm text-slate-400 uppercase tracking-widest mb-2">Ecuación de Movimiento</p>
+                        <div class="text-2xl md:text-3xl font-mono">
+                            m<sub>1</sub>l<sub>1</sub><sup>2</sup>&theta;̈ + b&theta;̇ + m<sub>1</sub>gl<sub>1</sub>cos(&theta;) = &tau;
+                        </div>
+                    </div>
+
+                    <h4 class="font-bold text-slate-800 mb-3">Representación Matricial Estándar</h4>
+                    <p class="text-slate-600 mb-4">En robótica, esto se estructura como <code>M(q)q̈ + C(q,q̇)q̇ + G(q) = &tau;</code>:</p>
+
+                    <div class="overflow-hidden border border-slate-200 rounded-lg">
+                        <table class="min-w-full divide-y divide-slate-200">
+                            <thead class="bg-slate-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Matriz</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Componente Físico</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fórmula</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-slate-200">
+                                <tr>
+                                    <td class="px-6 py-4 whitespace-nowrap font-mono font-bold text-blue-600">M(q)</td>
+                                    <td class="px-6 py-4 text-sm text-slate-700">Inercia</td>
+                                    <td class="px-6 py-4 text-sm font-mono">m<sub>1</sub>l<sub>1</sub><sup>2</sup></td>
+                                </tr>
+                                <tr>
+                                    <td class="px-6 py-4 whitespace-nowrap font-mono font-bold text-orange-600">C(q, q̇)</td>
+                                    <td class="px-6 py-4 text-sm text-slate-700">Fricción Viscosa / Coriolis</td>
+                                    <td class="px-6 py-4 text-sm font-mono">b (= 0.001)</td>
+                                </tr>
+                                <tr>
+                                    <td class="px-6 py-4 whitespace-nowrap font-mono font-bold text-purple-600">G(q)</td>
+                                    <td class="px-6 py-4 text-sm text-slate-700">Gravedad</td>
+                                    <td class="px-6 py-4 text-sm font-mono">m<sub>1</sub>gl<sub>1</sub>cos(&theta;)</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <footer class="bg-white border-t border-slate-200 py-8 mt-12">
+        <div class="max-w-7xl mx-auto px-4 text-center text-slate-500 text-sm">
+            <p>Generado a partir del reporte "Modelado Dinámico de Robot de 1 GDL (Algoritmo Euler-Lagrange)".</p>
+            <p class="mt-2">&copy; 2026 Simulación Educativa.</p>
+        </div>
+    </footer>
+
+    <script>
+        // --- CONSTANTS ---
+        const g = 9.81; // Gravity m/s^2
+
+        // --- STATE MANAGEMENT ---
+        const state = {
+            m1: 1.0,
+            l1: 1.0,
+            b: 0.001,
+            thetaDeg: 45,
+            dtheta: 0.0,
+            ddtheta: 0.0,
+
+            // Computed values
+            get thetaRad() { return this.thetaDeg * (Math.PI / 180); },
+
+            // Terms
+            get inertiaTerm() { return this.m1 * Math.pow(this.l1, 2) * this.ddtheta; },
+            get frictionTerm() { return this.b * this.dtheta; },
+            get gravityTerm() { return this.m1 * g * this.l1 * Math.cos(this.thetaRad); },
+            get totalTorque() { return this.inertiaTerm + this.frictionTerm + this.gravityTerm; },
+
+            // Energies
+            get kineticEnergy() { return 0.5 * this.m1 * Math.pow(this.l1, 2) * Math.pow(this.dtheta, 2); },
+            get potentialEnergy() { return this.m1 * g * this.l1 * Math.sin(this.thetaRad); }
+        };
+
+        // --- DOM ELEMENTS ---
+        const inputs = {
+            m1: document.getElementById('input-m1'),
+            l1: document.getElementById('input-l1'),
+            b: document.getElementById('input-b'),
+            theta: document.getElementById('input-theta'),
+            dtheta: document.getElementById('input-dtheta'),
+            ddtheta: document.getElementById('input-ddtheta')
+        };
+
+        const labels = {
+            m1: document.getElementById('val-m1'),
+            l1: document.getElementById('val-l1'),
+            b: document.getElementById('val-b'),
+            theta: document.getElementById('val-theta'),
+            dtheta: document.getElementById('val-dtheta'),
+            ddtheta: document.getElementById('val-ddtheta'),
+
+            torque: document.getElementById('total-torque'),
+            termInertia: document.getElementById('term-inertia'),
+            termFriction: document.getElementById('term-friction'),
+            termGravity: document.getElementById('term-gravity')
+        };
+
+        const canvas = document.getElementById('robotCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // --- CHART INSTANCES ---
+        let torqueChart = null;
+        let gravityChart = null;
+        let energyChart = null;
+
+        // --- INITIALIZATION ---
+        function init() {
+            // Setup Listeners
+            Object.keys(inputs).forEach(key => {
+                inputs[key].addEventListener('input', (e) => {
+                    updateState(key, parseFloat(e.target.value));
+                });
+            });
+
+            // Initialize Charts
+            initTorqueChart();
+            initGravityChart();
+            initEnergyChart();
+
+            // Initial Draw
+            updateUI();
+        }
+
+        // --- UPDATE LOGIC ---
+        function updateState(key, value) {
+            if (key === 'theta') state.thetaDeg = value;
+            else state[key] = value;
+
+            updateUI();
+        }
+
+        function updateUI() {
+            // Update Labels
+            labels.m1.textContent = state.m1.toFixed(1) + ' kg';
+            labels.l1.textContent = state.l1.toFixed(1) + ' m';
+            labels.b.textContent = state.b.toFixed(3);
+            labels.theta.textContent = state.thetaDeg + '°';
+            labels.dtheta.textContent = state.dtheta.toFixed(1) + ' rad/s';
+            labels.ddtheta.textContent = state.ddtheta.toFixed(1) + ' rad/s²';
+
+            // Update Calculations Display
+            labels.torque.textContent = state.totalTorque.toFixed(2) + ' Nm';
+            labels.termInertia.textContent = state.inertiaTerm.toFixed(2) + ' Nm';
+            labels.termFriction.textContent = state.frictionTerm.toFixed(2) + ' Nm';
+            labels.termGravity.textContent = state.gravityTerm.toFixed(2) + ' Nm';
+
+            // Draw Robot
+            drawRobot();
+
+            // Update Charts
+            updateCharts();
+        }
+
+        // --- VISUALIZATION: CANVAS DRAWING ---
+        function drawRobot() {
+            const width = canvas.width;
+            const height = canvas.height;
+            const centerX = width / 2;
+            const centerY = height / 2;
+
+            // Clear
+            ctx.clearRect(0, 0, width, height);
+
+            // Scaling factor (pixels per meter)
+            // Max length is 5m, canvas is 400px. let's say 2.5m fits in radius (approx 150px)
+            // So 1m = 60px roughly, adjusted dynamically if length is huge, but let's keep it simple
+            const scale = 50;
+
+            // Coordinates relative to center
+            // Note: Canvas Y is down, so we subtract Y1 for visual up
+            // X1 = l1 cos(theta), Y1 = l1 sin(theta)
+            const x1 = state.l1 * Math.cos(state.thetaRad) * scale;
+            const y1 = state.l1 * Math.sin(state.thetaRad) * scale;
+
+            const pivotX = centerX;
+            const pivotY = centerY;
+            const massX = centerX + x1;
+            const massY = centerY - y1; // Flip Y for cartesian view
+
+            // Draw Base
+            ctx.beginPath();
+            ctx.fillStyle = '#e2e8f0';
+            ctx.arc(pivotX, pivotY, 15, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.stroke();
+
+            // Draw Link
+            ctx.beginPath();
+            ctx.moveTo(pivotX, pivotY);
+            ctx.lineTo(massX, massY);
+            ctx.lineWidth = 8;
+            ctx.strokeStyle = '#3b82f6'; // Blue-500
+            ctx.lineCap = 'round';
+            ctx.stroke();
+
+            // Draw Mass
+            ctx.beginPath();
+            ctx.arc(massX, massY, 10 + (state.m1 * 2), 0, 2 * Math.PI); // Radius grows slightly with mass
+            ctx.fillStyle = '#1e293b'; // Slate-800
+            ctx.fill();
+
+            // Draw Ghost of Gravity Vector
+            ctx.beginPath();
+            ctx.moveTo(massX, massY);
+            ctx.lineTo(massX, massY + 40); // Gravity always down
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#a855f7'; // Purple for gravity force visual
+            ctx.setLineDash([5, 5]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Text info
+            ctx.font = '12px Inter';
+            ctx.fillStyle = '#64748b';
+            ctx.fillText(`L = ${state.l1}m`, (pivotX + massX)/2 + 10, (pivotY + massY)/2);
+        }
+
+        // --- CHARTS ---
+        function initTorqueChart() {
+            const ctxTorque = document.getElementById('torqueBreakdownChart').getContext('2d');
+            torqueChart = new Chart(ctxTorque, {
+                type: 'bar',
+                data: {
+                    labels: ['Inercia', 'Fricción', 'Gravedad'],
+                    datasets: [{
+                        label: 'Contribución al Torque (Nm)',
+                        data: [0, 0, 0],
+                        backgroundColor: ['#3b82f6', '#f97316', '#a855f7'],
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { beginAtZero: true, grid: { display: false } },
+                        y: { grid: { display: false } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        function initGravityChart() {
+            // Generate data for -90 to 90 degrees
+            const labels = [];
+            const dataPoints = [];
+            for(let i = -180; i <= 180; i+=10) {
+                labels.push(i);
+                // Placeholder, will update in loop
+                dataPoints.push(0);
+            }
+
+            const ctxGrav = document.getElementById('gravityChart').getContext('2d');
+            gravityChart = new Chart(ctxGrav, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'G(θ) = m₁gl₁cos(θ)',
+                        data: dataPoints,
+                        borderColor: '#a855f7',
+                        backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.parsed.y.toFixed(2) + ' Nm';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { title: { display: true, text: 'Ángulo (Grados)' } },
+                        y: { title: { display: true, text: 'Torque Gravitacional (Nm)' } }
+                    }
+                }
+            });
+        }
+
+        function initEnergyChart() {
+             const ctxEnergy = document.getElementById('energyChart').getContext('2d');
+             energyChart = new Chart(ctxEnergy, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Cinética (T)', 'Potencial (U) (Abs)'],
+                    datasets: [{
+                        data: [0, 0],
+                        backgroundColor: ['#22c55e', '#a855f7'],
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right' }
+                    }
+                }
+             });
+        }
+
+        function updateCharts() {
+            // 1. Update Torque Breakdown
+            torqueChart.data.datasets[0].data = [
+                state.inertiaTerm,
+                state.frictionTerm,
+                state.gravityTerm
+            ];
+            torqueChart.update();
+
+            // 2. Update Gravity Profile Curve (updates if m1 or l1 changes)
+            // Recalculate the curve based on current m1 and l1
+            const gravityData = gravityChart.data.labels.map(angle => {
+                const rad = angle * (Math.PI / 180);
+                return state.m1 * g * state.l1 * Math.cos(rad);
+            });
+            gravityChart.data.datasets[0].data = gravityData;
+
+            // Highlight current position on the chart?
+            // Advanced: Could add a point annotation, but standard update is fine.
+            gravityChart.update('none'); // 'none' mode for performance
+
+            // 3. Update Energy
+            // Note: U can be negative. For doughnut chart visualization, we use Abs value but tooltip shows real.
+            // Or better, shift U reference? We'll just show Magnitude for visualization proportion.
+            const t = state.kineticEnergy;
+            const u = state.potentialEnergy;
+
+            // For the chart visual, we just show T vs abs(U) as "Activity"
+            energyChart.data.datasets[0].data = [t, Math.abs(u)];
+            energyChart.update();
+        }
+
+        // --- TABS LOGIC ---
+        function switchTab(tabId, btnElement) {
+            // Hide all contents
+            document.querySelectorAll('.tab-content').forEach(el => {
+                el.classList.add('hidden');
+                el.classList.remove('block');
+            });
+            // Show selected
+            document.getElementById(tabId).classList.remove('hidden');
+            document.getElementById(tabId).classList.add('block');
+
+            // Update buttons
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.classList.remove('active', 'text-blue-600', 'font-bold', 'border-b-2', 'border-blue-600');
+                btn.classList.add('text-slate-500');
+            });
+            btnElement.classList.remove('text-slate-500');
+            btnElement.classList.add('active');
+        }
+
+        function scrollToSection(id) {
+            document.getElementById(id).scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Run
+        window.addEventListener('load', init);
+
+    </script>
+</body>
+</html>
